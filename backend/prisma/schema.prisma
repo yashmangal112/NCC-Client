@@ -1,0 +1,291 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ----------------------------------------------------
+// ENUMS
+// ----------------------------------------------------
+
+enum Role {
+  SUPER_ADMIN
+  UNIT_OFFICER
+  SCHOOL_HEAD
+  DELIVERY_PERSON
+}
+
+enum OrderStatus {
+  PENDING
+  DELIVERED
+  CANCELLED
+}
+
+enum DeliveryStatus {
+  SCHEDULED
+  ASSIGNED
+  OUT_FOR_DELIVERY
+  DELIVERED
+}
+
+enum PacketRequestStatus {
+  PENDING
+  FULFILLED
+  DECLINED
+}
+
+// ----------------------------------------------------
+// USER & AUTHENTICATION MODEL
+// ----------------------------------------------------
+
+model User {
+  id         String   @id @default(uuid())
+  email      String   @unique
+  password   String?
+  isUnit     Boolean  @default(false)
+  isAdmin    Boolean  @default(false)
+  isSchool   Boolean  @default(false)
+  isDelivery Boolean  @default(false)
+  role       Role     @default(SCHOOL_HEAD)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  unit           Unit?
+  school         School?
+  deliveryPerson DeliveryPerson?
+}
+
+// ----------------------------------------------------
+// MILITARY UNIT MODEL
+// ----------------------------------------------------
+
+model Unit {
+  id        String   @id @default(uuid())
+  unitCode  String   @unique // e.g. UNIT-001
+  name      String // e.g. 4 Delhi BN NCC
+  spocName  String // Designated Officer / SPOC Name
+  spocPhone String?  
+  spocEmail String
+  userId    String?  @unique
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  schoolAllocations    SchoolUnitAllocation[]
+  orders               Order[]
+  PacketUnitAllocation PacketUnitAllocation[]
+}
+
+model School {
+  id              String   @id @default(uuid())
+  code            String   @unique // Institutional Code (e.g. NCC-SC-00101)
+  name            String
+  address         String
+  headName        String
+  headDesignation String   @default("Principal")
+  headEmail       String
+  headPhone       String?  
+  userId          String?  @unique
+  user            User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  unitAllocations SchoolUnitAllocation[]
+  orders          Order[]
+  packetRequests  PacketRequest[]
+}
+
+model DeliveryPerson {
+  id             String   @id @default(uuid())
+  userId         String   @unique
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fullName       String
+  phone          String
+  email          String?  @unique
+  vehicleNo      String?
+  status         String   @default("ACTIVE") // ACTIVE, ON_DELIVERY, OFF_DUTY
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  assignedOrders Order[]
+}
+
+// ----------------------------------------------------
+// MULTI-UNIT ALLOCATION JOIN MODEL (School <-> Unit)
+// ----------------------------------------------------
+// Supports mapping a single school to multiple units with student counts per unit!
+model SchoolUnitAllocation {
+  id           String   @id @default(uuid())
+  schoolId     String
+  school       School   @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  unitId       String
+  unit         Unit     @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  studentCount Int      @default(0) // Cadets enrolled under this specific unit
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([schoolId, unitId])
+}
+
+// ----------------------------------------------------
+// INVENTORY SKU MODEL
+// ----------------------------------------------------
+
+model Vendor {
+  id            String      @id @default(uuid())
+  vendorCode    String      @unique // e.g. VEN-001
+  name          String
+  contactPerson String
+  phone         String
+  email         String?
+  address       String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  vendorSkus    VendorSku[]
+  Sku           Sku[]
+}
+
+model Sku {
+  id            String      @id @default(uuid())
+  skuCode       String      @unique // e.g. SKU-2024-001
+  name          String
+  category      String
+  costPrice     Float
+  quantity      Int         @default(0) // Inventory Stock Quantity
+  unitOfMeasure String      @default("Pack") // Pack, Piece, Box, Liter
+  description   String?
+  isArchived    Boolean     @default(false)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  vendorId      String?
+  vendor        Vendor?     @relation(fields: [vendorId], references: [id], onDelete: SetNull)
+  packetSkus    PacketSku[]
+  vendorSkus    VendorSku[]
+}
+
+model VendorSku {
+  id        String   @id @default(uuid())
+  vendorId  String
+  vendor    Vendor   @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  skuId     String
+  sku       Sku      @relation(fields: [skuId], references: [id], onDelete: Cascade)
+  price     Float?
+  quantity  Int      @default(0) // Stock quantity supplied by this vendor
+  createdAt DateTime @default(now())
+
+  @@unique([vendorId, skuId])
+}
+
+model Packet {
+  id             String   @id @default(uuid())
+  packetCode     String   @unique
+  name           String
+  category       String   @default("Standard Refreshment")
+  sellingPrice   Float    @default(0.0) // ADD
+  totalCostPrice Float    @default(0.0)
+  margin         Float    @default(0.0) // ADD
+  description    String? // ADD
+  status         String   @default("ACTIVE")
+  isArchived     Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  childSkus     PacketSku[]
+  units         PacketUnitAllocation[]
+  orders        OrderItem[]
+  PacketRequest PacketRequest[]
+}
+
+model PacketUnitAllocation {
+  id       String @id @default(uuid())
+  packetId String
+  unitId   String
+  packet   Packet @relation(fields: [packetId], references: [id], onDelete: Cascade)
+  unit     Unit   @relation(fields: [unitId], references: [id], onDelete: Cascade)
+
+  @@unique([packetId, unitId])
+}
+
+model PacketSku {
+  id        String   @id @default(uuid())
+  packetId  String
+  packet    Packet   @relation(fields: [packetId], references: [id], onDelete: Cascade)
+  skuId     String
+  sku       Sku      @relation(fields: [skuId], references: [id], onDelete: Cascade)
+  quantity  Int      @default(1) // Quantity of this SKU in the packet
+  sellingPrice Float    @default(0.0)
+  createdAt DateTime @default(now())
+
+  @@unique([packetId, skuId])
+}
+
+model PacketRequest {
+  id                String              @id @default(uuid())
+  requestCode       String              @unique // e.g. REQ-2024-001
+  schoolId          String
+  school            School              @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  requestedBy       String // School head / Officer name
+  description       String // Specification note
+  status            PacketRequestStatus @default(PENDING)
+  declineReason     String?
+  fulfilledPacketId String?
+  fulfilledPacket   Packet?             @relation(fields: [fulfilledPacketId], references: [id], onDelete: SetNull)
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+}
+
+model Order {
+  id               String         @id @default(uuid())
+  orderNumber      String         @unique // e.g. #ORD-9942
+  schoolId         String
+  school           School         @relation(fields: [schoolId], references: [id], onDelete: Restrict)
+  unitId           String
+  unit             Unit           @relation(fields: [unitId], references: [id], onDelete: Restrict)
+  status           OrderStatus    @default(PENDING)
+  deliveryStatus   DeliveryStatus @default(SCHEDULED)
+  deliveryDate     DateTime
+  deliveryLocation String
+  totalQty         Int
+  totalAmount      Float
+  officerInCharge  String
+  internalNote     String?
+
+  // Delivery Personnel & Logistics Meta
+  driverId      String?
+  driverName    String?
+  driverPhone   String?
+  vehicleNo     String?
+  proofFileName String?
+  proofUrl      String?
+  deliveryNote  String?
+  confirmedAt   DateTime?
+
+  // Payment Proof & Verification
+  paymentUploaded   Boolean   @default(false)
+  utrNumber         String?
+  paymentProofUrl   String?
+  paidAmount        Float?
+  paymentUploadedAt DateTime?
+  paymentVerified   Boolean   @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  orderItems OrderItem[]
+  driver     DeliveryPerson? @relation(fields: [driverId], references: [id])
+}
+
+model OrderItem {
+  id        String   @id @default(uuid())
+  orderId   String
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  packetId  String
+  packet    Packet   @relation(fields: [packetId], references: [id], onDelete: Restrict)
+  quantity  Int
+  unitRate  Float
+  subtotal  Float
+  createdAt DateTime @default(now())
+}
